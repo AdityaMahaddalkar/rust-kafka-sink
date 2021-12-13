@@ -1,36 +1,35 @@
+use std::time::Duration;
 use log::{info, warn};
-use rdkafka::{consumer::{BaseConsumer, Consumer}, ClientConfig, Message};
+use rdkafka::{consumer::{BaseConsumer, Consumer}, ClientConfig, util::Timeout};
 
 fn main() {
-    consume_and_print("localhost:29092", "rust-app", &vec!["rust-kafka"]);
+    env_logger::init();
+    
+    let broker = "localhost:9092";
+    info!("Starting application to listen to {}", broker);
+    
+    consume_and_print(broker, "rust-app", &vec!["rust-kafka"]);
 }
 
 fn consume_and_print(brokers: &str, group_id: &str, topics: &Vec<&str>) {
 
-    let consumer = ClientConfig::new()
+    let consumer: BaseConsumer = ClientConfig::new()
         .set("group.id", group_id)
         .set("bootstrap.servers", brokers)
         .set("enable.auto.commit", "true")
-        .expect("Consiumer creation failed");
+        .create()
+        .expect("Error creating kafka consumer");
 
     consumer.subscribe(topics)
         .expect("Can't subscribe to specified topics");
 
     loop {
-        match consumer.recv().await {
-            Err(e) => warn!("Kafka error: {}". e),
-            Ok(m) => {
-                let payload = match m.payload_view::<str>() {
-                    None => "",
-                    Some(Ok(s)) => s,
-                    Some(Err(e)) => {
-                        warn!("Error while deserializing message payload {:?}", e);
-                        ""
-                    }
-                };
-                info!("payload: {}");
-                consumer.commit_message(&m, CommitMode::Async).unwrap();
+        match consumer.poll(Timeout::After(Duration::from_secs(60))) {
+            Some(Err(e)) => warn!("Consumer threw error: {:?}", e),
+            Some(Ok(m)) => {
+                info!("Received message: {:?}", m);
             }
+            None => warn!("Consumer didn't return anything"),
         }
     }
 }
